@@ -77,6 +77,13 @@ def find_row_col(row, x, y):
                         return row_new, col_new
 
 
+class SetEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, set):
+            return list(obj)
+        return json.JSONEncoder.default(self, obj)
+
+
 class Cell:
     def __init__(self, img, x1, y1, width, height):
         self.img = img
@@ -86,8 +93,6 @@ class Cell:
         self.y1 = y1
         self.x2 = x1 + width
         self.y2 = y1 + height
-        self.width = width
-        self.height = height
         self.text = None
         self.score = None
         self.std = None
@@ -171,16 +176,26 @@ class Cell:
             prev_child.col = current_col
         self.child_max_col = current_col
 
-    def write_to_csv(self, i):
+    def to_dataframe(self, i):
         if not self.childs or (self.child_max_col == 1 and self.child_max_row == 1):
             return
         df = pd.DataFrame(columns=range(self.child_max_col), index=range(self.child_max_row))
         for box in self.childs:
             df.loc[box.row, box.col] = box.text
-        df.to_csv("ocr_table" + "/" + os.path.basename(file + str(i) + ".csv"), encoding="utf-8", index=False)
+        return df
 
-    def write_to_json(self):
-        pass
+    def to_json(self):
+        predicted_boxes_dict = {
+            "type": "text",
+            "text": self.text, "row": self.row, "col": self.col, "xmin": self.x1, "ymin": self.y1,
+            "xmax": self.x2, "ymax": self.y2, "score": self.score, "std": self.std
+        }
+        json_list = [predicted_boxes_dict]
+        if not self.childs:
+            return predicted_boxes_dict
+        table = {"type": "table", "cells": [child.to_json() for child in self.childs]}
+        json_list.append(table)
+        return json_list
 
     def recognize_and_get_structure_of_table(self):
         self.recognize()
@@ -248,12 +263,22 @@ for cell1, cell2 in list_contours_with_combinations:
             cell1.childs.append(cell2)
 
 for elem_of_box in box:
-    # if elem_of_box.x1 == 98 and elem_of_box.y1 == 645:
     elem_of_box.recognize_and_get_structure_of_table()
 
 for i, elem_of_box in enumerate(box):
-    # if elem_of_box.x1 == 98 and elem_of_box.y1 == 645:
-    elem_of_box.write_to_csv(i)
+    df = elem_of_box.to_dataframe(i)
+    df.to_csv("ocr_table" + "/" + os.path.basename(f"{file}_{elem_of_box.x1}_{elem_of_box.y1}.csv"), encoding="utf-8",
+              index=False)
+
+list_all_table = []
+for elem_of_box in box:
+    if elem_of_box.parent:
+        continue
+    json_list = elem_of_box.to_json()
+    list_all_table.append(json_list)
+
+with open("json" + "/" + os.path.basename(f"{file}.json"), "w", encoding="utf-8") as f:
+    json.dump(list_all_table, f, ensure_ascii=False, indent=4, cls=SetEncoder)
 
 
 # for cell in box:
